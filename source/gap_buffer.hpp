@@ -79,7 +79,7 @@ struct SearchResult
 };
 
 enum {
-    TAB_WIDTH_DEFAULT = 4,
+    TAB_WIDTH_DEFAULT = 2,
     TAB_WIDTH_MIN = 2,
     TAB_WIDTH_MAX = 16,
 };
@@ -1746,33 +1746,6 @@ IoError buffer_load(Buffer *buffer)
     }
 
     if (error == IoError::OK) {
-        s32 check_size = min(buffer->a, 128*1024);
-
-        buffer->tab_mode = TabMode::SOFT;
-        for (s32 i = 0; i < check_size; ++i) {
-            if (buffer->data[i] == '\t') {
-                buffer->tab_mode = TabMode::HARD;
-                break;
-            }
-        }
-
-        buffer->newline_mode = NewlineMode::CRLF;
-        for (s32 i = 0; i + 1 < check_size; ++i) {
-            char a = buffer->data[i];
-            char b = buffer->data[i + 1];
-            if (a == '\r' && b == '\n') {
-                buffer->newline_mode = NewlineMode::CRLF;
-                break;
-            }
-            if (a == '\r') {
-                buffer->newline_mode = NewlineMode::CR;
-                break;
-            }
-            if (a == '\n') {
-                buffer->newline_mode = NewlineMode::LF;
-            }
-        }
-
         buffer->last_saved_revision = buffer->revision;
 
         for (s32 i = 0; i < array_length(buffer->views); ++i) {
@@ -1788,6 +1761,93 @@ IoError buffer_load(Buffer *buffer)
 
         buffer->history_length = 0;
         buffer->history_caret = 0;
+
+
+        // Guess newline mode and tab width
+        // This is slightly silly, because it is based on virtual lines, so it will get messed up if we open the buffer in a messed-up resolution the first time.
+        s32 tab_count = 0;
+        s32 leading_space_count[TAB_WIDTH_MAX*2] = {0};
+
+        s32 lf_count = 0;
+        s32 cr_count = 0;
+        s32 crlf_count = 0;
+
+        for (s32 i = 0; i < min(buffer->lines.length, 1024); ++i) {
+            VirtualLine *line = &buffer->lines[i];
+            str text = buffer_get_virtual_line_text(buffer, i);
+
+            if (line->virtual_indent == 0) {
+                if (text.length > 0 && text[0] == '\t') {
+                    ++tab_count;
+                } else {
+                    s32 leading_spaces = 0;
+                    while (leading_spaces <= alen(leading_space_count) &&
+                           leading_spaces < text.length &&
+                           text[leading_spaces] == ' ')
+                    {
+                        ++leading_spaces;
+                    }
+
+                    if (leading_spaces <= alen(leading_space_count)) {
+                        leading_space_count[leading_spaces - 1] += 1;
+                    }
+                }
+            }
+
+            if (line->flags & VirtualLine::ENDS_IN_ACTUAL_NEWLINE) {
+                if (text.length >= 2 && text[text.length - 2] == '\r' && text[text.length - 1] == '\n') {
+                    ++crlf_count;
+                } else if (text.length >= 1) {
+                    if (text[text.length - 1] == '\r') {
+                        ++cr_count;
+                    } else if (text[text.length - 1] == '\n') {
+                        ++lf_count;
+                    }
+                }
+            }
+        }
+
+        buffer->tab_width = TAB_WIDTH_DEFAULT;
+        if (tab_count > 0) {
+            buffer->tab_mode = TabMode::HARD;
+        } else {
+            buffer->tab_mode = TabMode::SOFT;
+
+            s32 indent_width_likeliness = S32_MIN;
+            for (s32 width = TAB_WIDTH_MIN; width <= TAB_WIDTH_MAX; ++width) {
+                s32 likeliness = 0;
+                for (s32 i = 0; i < alen(leading_space_count); ++i) {
+                    s32 count = leading_space_count[i];
+                    if ((i + 1) % width == 0) {
+                        likeliness += count / ((i + 1) / width);
+                    } else {
+                        likeliness -= count;
+                    }
+                }
+                if (likeliness > indent_width_likeliness) {
+                    buffer->tab_width = width;
+                    indent_width_likeliness = likeliness;
+                }
+            }
+        }
+
+        s32 indent_types = 0;
+        if (lf_count > 0) {
+            ++indent_types;
+            buffer->newline_mode = NewlineMode::LF;
+        }
+        if (cr_count > 0) {
+            ++indent_types;
+            buffer->newline_mode = NewlineMode::CR;
+        }
+        if (crlf_count > 0) {
+            ++indent_types;
+            buffer->newline_mode = NewlineMode::CRLF;
+        }
+        if (indent_types > 1) {
+            debug_printf("Multiple different newline types seen (%i LF, %i CR, %i CRLF)\n", lf_count, cr_count, crlf_count);
+        }
+        debug_printf("Multiple different newline types seen (%i LF, %i CR, %i CRLF)\n", lf_count, cr_count, crlf_count);
     }
 
     return(error);
