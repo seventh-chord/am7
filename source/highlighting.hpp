@@ -45,14 +45,16 @@ struct NamedHighlightFunction
 };
 
 HighlightList *highlight_c(str line, HighlightState *state);
-HighlightList *highlight_bat(str line, HighlightState *state);
 HighlightList *highlight_python(str line, HighlightState *state);
+HighlightList *highlight_odin(str line, HighlightState *state);
+HighlightList *highlight_bat(str line, HighlightState *state);
 
 NamedHighlightFunction HIGHLIGHT_FUNCTIONS[] = {
     { "None", null, {} },
-    { "c and c++", &highlight_c, { lit_to_str("c"), lit_to_str("h"), lit_to_str("cpp"), lit_to_str("hpp") } },
-    { "python", &highlight_python, { lit_to_str("py") } },
-    { ".bat scripts", &highlight_bat, { lit_to_str("bat"), lit_to_str("cmd") } },
+    { "C and C++", &highlight_c, { lit_to_str("c"), lit_to_str("h"), lit_to_str("cpp"), lit_to_str("hpp") } },
+    { "Python", &highlight_python, { lit_to_str("py") } },
+    { "Odin", &highlight_odin, { lit_to_str("odin") } },
+    { "Batch scripts", &highlight_bat, { lit_to_str("bat"), lit_to_str("cmd") } },
 };
 
 s32 highlight_get_function_index(str ext) {
@@ -303,6 +305,199 @@ HighlightList *highlight_c(str line, HighlightState *state)
                 }
 
             // TODO Raw strings
+
+            } else if (is_identifier_start_c(a)) {
+                // TODO Unicode characters in identifiers
+
+                Highlight *entry = list_add();
+                entry->start = i;
+                i += 1;
+                while (i < line.length && is_identifier_character_c(line[i])) i++;
+                entry->end = i;
+                entry->kind = HighlightKind::Identifier;
+
+                str identifier = slice(line, entry->start, entry->end);
+
+                s32 index_min, index_max;
+                char first = identifier[0];
+                if (first >= KEYWORD_FIRST_MIN && first <= KEYWORD_FIRST_MAX) {
+                    index_min = ORDERED_KEYWORD_OFFSETS[first - KEYWORD_FIRST_MIN];
+                    index_max = ORDERED_KEYWORD_OFFSETS[first - KEYWORD_FIRST_MIN + 1];
+                } else {
+                    index_min = ORDERED_KEYWORD_OFFSETS[array_length(ORDERED_KEYWORD_OFFSETS) - 1];
+                    index_max = array_length(KEYWORDS);
+                }
+                for (s32 i = index_min; i < index_max; ++i) {
+                    char *keyword = KEYWORDS[i].name;
+                    if (keyword == identifier) {
+                        entry->kind = KEYWORDS[i].other_kind? HighlightKind::OtherLiteral : HighlightKind::Keyword;
+                        break;
+                    }
+                }
+            } else if (is_digit(a) || (a == '.' && is_digit(b))) {
+                EatResult number = eat_number_c(slice(line, i));
+                if (number.valid) {
+                    Highlight *entry = list_add();
+                    entry->start = i;
+                    entry->end = i + number.length;
+                    entry->kind = HighlightKind::NumberLiteral;
+                }
+                i += max(number.length, 1);
+
+            } else {
+                ++i;
+            }
+
+            if (a != ' ' && a != '\t') at_start_of_line = false;
+        }
+    }
+
+    #undef list_add
+
+    return(result);
+}
+
+HighlightList *highlight_odin(str line, HighlightState *state)
+{
+    static const
+    struct { char *name; bool other_kind; }
+    KEYWORDS[] = {
+        { "align_of", 0 },
+        { "auto_cast", 0 },
+        { "bit_field", 0 },
+        { "bit_set", 0 },
+        { "case", 0 },
+        { "cast", 0 },
+        { "context", 0 },
+        { "defer", 0 },
+        { "delete", 0 },
+        { "distinct", 0 },
+        { "dynamic", 0 },
+        { "enum", 0 },
+        { "fallthrough", 0 },
+        { "false", 1 },
+        { "for", 0 },
+        { "foreign", 0 },
+        { "if", 0 },
+        { "import", 0 },
+        { "in", 0 },
+        { "inline", 0 },
+        { "map", 0 },
+        { "nil", 1 },
+        { "no_inline", 0 },
+        { "not_in", 0 },
+        { "offset_of", 0 },
+        { "opaque", 0 },
+        { "package", 0 },
+        { "proc", 0 },
+        { "return", 0 },
+        { "size_of", 0 },
+        { "struct", 0 },
+        { "switch", 0 },
+        { "transmute", 0 },
+        { "true", 1 },
+        { "type_of", 0 },
+        { "union", 0 },
+        { "using", 0 },
+        { "when", 0 },
+    };
+    enum { KEYWORD_FIRST_MIN = 'a', KEYWORD_FIRST_MAX = 'w' };
+    static s32 ORDERED_KEYWORD_OFFSETS[KEYWORD_FIRST_MAX - KEYWORD_FIRST_MIN + 2] = {0};
+    static bool ORDERED_KEYWORDS_INITIALIZED = false;
+    if (!ORDERED_KEYWORDS_INITIALIZED) {
+        ORDERED_KEYWORDS_INITIALIZED = true;
+        s32 i = 0;
+        char c = KEYWORD_FIRST_MIN;
+        while (i < array_length(KEYWORDS) && KEYWORDS[i].name[0] != c) ++i;
+        while (c <= KEYWORD_FIRST_MAX) {
+            ORDERED_KEYWORD_OFFSETS[c - KEYWORD_FIRST_MIN] = i;
+            while (i < array_length(KEYWORDS) && KEYWORDS[i].name[0] == c) ++i;
+            ++c;
+        }
+        ORDERED_KEYWORD_OFFSETS[array_length(ORDERED_KEYWORD_OFFSETS) - 1] = i;
+    }
+
+
+    HighlightList *result = null;
+    HighlightList *last = null;
+    #define list_add() (last = ((last? last->next : result) = stack_alloc(HighlightList, 1)), &last->highlight) // c is nice :)
+
+    s32 i = 0;
+    bool at_start_of_line = true;
+    bool block_comment_started_on_this_line = false;
+
+    while (i < line.length) {
+        if (is_newline(line[i])) {
+            i = line.length;
+        } else if (*state == HighlightState::BlockComment) {
+            s32 i0 = i;
+
+            if (block_comment_started_on_this_line) i += 2;
+            block_comment_started_on_this_line = false;
+
+            while (i < line.length && !is_newline(line[i]) && !(i + 1 < line.length && line[i] == '*' && line[i + 1] == '/')) ++i;
+
+            if (i + 1 < line.length && line[i] == '*') {
+                i += 2;
+                *state = HighlightState::Default;
+            }
+
+            if (i != i0) {
+                Highlight *entry = list_add();
+                entry->kind = HighlightKind::Comment;
+                entry->start = i0;
+                entry->end = i;
+            }
+        } else {
+            char a = (i + 0 < line.length)? line[i + 0] : 0;
+            char b = (i + 1 < line.length)? line[i + 1] : 0;
+            char c = (i + 2 < line.length)? line[i + 2] : 0;
+
+            if (a == '/' && b == '*') {
+                *state = HighlightState::BlockComment;
+                block_comment_started_on_this_line = true;
+
+            } else if (a == '/' && b == '/') {
+                Highlight *entry = list_add();
+                entry->start = i;
+                entry->kind = HighlightKind::Comment;
+                i += 2;
+                while (i < line.length && !(line[i] == '\r' || line[i] == '\n')) ++i;
+                entry->end = i;
+
+            } else if (a == '\'' || a == '"' ||
+                       ((a == 'u' || a == 'U' || a == 'L') && (b == '\'' || b == '"')) ||
+                       (a == 'u' && b == '8' && (c == '\'' || c == '"')))
+            {
+                s32 start = i;
+                s32 end = -1;
+
+                HighlightKind kind;
+                char quote;
+                if (a == '"' || (a != '\'' && b == '"') || (a != '\'' && b != '\'' && c == '"')) {
+                    quote = '"';
+                    kind = HighlightKind::StringLiteral;
+                } else {
+                    quote = '\'';
+                    kind = HighlightKind::CharacterLiteral;
+                }
+
+                while (i < line.length && line[i] != quote) ++i;
+                ++i;
+                while (i < line.length && end == -1) {
+                    if (line[i] == quote) end = i + 1;
+                    if (i + 1 < line.length && line[i] == '\\') ++i;
+                    ++i;
+                }
+
+                if (end == -1) {
+                    i = start + 1;
+                } else {
+                    Highlight *entry = list_add();
+                    entry->kind = kind;
+                    entry->start = start;
+                    entry->end = end;
+                }
 
             } else if (is_identifier_start_c(a)) {
                 // TODO Unicode characters in identifiers
