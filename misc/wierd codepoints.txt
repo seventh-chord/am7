@@ -1,0 +1,8 @@
+alpha: É‘
+latin1: ä, ß
+bruh: ô¿¿
+bruh: ô¿À
+sur0:í €
+sur1: í¿¿
+sur2: î€€
+invalid: ÃÃŸŸÃ

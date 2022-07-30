@@ -1,0 +1,66 @@
+/**********************************************************************************/
+/******************************* Daten �bernehmen *********************************/
+/**********************************************************************************/
+                                                                        void CAN_receive (unsigned char mb) {	// 22.4 �s @ isr
+  unsigned int i, ip, rmb, obj, cnt=0;
+  rmb = mb - 1;
+
+  if (CAN_MBOX[mb].msg_ctl & MSGLST_) {
+    CAN_MBOX[mb].msg_ctl = MSGLST_CLR;
+    lost_count[rmb]++;
+  }
+
+  do {
+    CAN_MBOX[mb].msg_ctl = NEWDAT_CLR;
+	 obj = (CAN_MBOX[mb].U_arb >> 1) & 0x000f;
+	 if (obj < 10)	{
+		CAN_DATA[rmb].OBJ[obj][0] = CAN_MBOX[mb].msg[0];
+		CAN_DATA[rmb].OBJ[obj][1] = CAN_MBOX[mb].msg[1];
+		CAN_DATA[rmb].OBJ[obj][2] = CAN_MBOX[mb].msg[2];
+		CAN_DATA[rmb].OBJ[obj][3] = CAN_MBOX[mb].msg[3];
+		CAN_DATA[rmb].OBJ[obj][4] = CAN_MBOX[mb].msg[4];
+		CAN_DATA[rmb].OBJ[obj][5] = CAN_MBOX[mb].msg[5];
+		CAN_DATA[rmb].OBJ[obj][6] = CAN_MBOX[mb].msg[6];
+		CAN_DATA[rmb].OBJ[obj][7] = CAN_MBOX[mb].msg[7];
+		can_Rx_psec++;
+		if (obj == 2 || obj > 6) can_Rx_psec_cyclic++;
+		if (CAN_MBOX[mb].msg_ctl & CAN_DATA_LOST) lost_count[rmb]++;
+		else break;
+	 }
+    else break;
+	 cnt++;
+  } 
+  while (cnt < 10);
+
+  CAN_MBOX[mb].msg_ctl = INTPND_CLR;
+  if (obj < 10) can_messages[rmb]++;
+  CAIS_mpsec[rmb]++;
+
+  switch (obj) {
+    case 1: if (CAN_DATA[rmb].OBJ[1][0] == CANid || CAN_DATA[rmb].OBJ[1][0] & 0xf0) {
+	           i = ip = CAN_Rx_produce_index;
+				  if (++ip == CAN_Rx_QUEUE_SIZE) ip = 0;
+
+				  if (ip == CAN_Rx_consume_index) can_Rx_lost_count++;
+				  else {
+					 can_Rx_queue[i].data[0] = CAN_DATA[rmb].OBJ[1][0];
+					 can_Rx_queue[i].data[1] = CAN_DATA[rmb].OBJ[1][1];
+					 can_Rx_queue[i].data[2] = CAN_DATA[rmb].OBJ[1][2];
+					 can_Rx_queue[i].data[3] = CAN_DATA[rmb].OBJ[1][3];
+					 can_Rx_queue[i].data[4] = CAN_DATA[rmb].OBJ[1][4];
+					 can_Rx_queue[i].data[5] = CAN_DATA[rmb].OBJ[1][5];
+					 can_Rx_queue[i].data[6] = CAN_DATA[rmb].OBJ[1][6];
+					 can_Rx_queue[i].data[7] = CAN_DATA[rmb].OBJ[1][7];
+					 CAN_Rx_produce_index = ip;
+				    CAN_IN_RX_QUEUE++;
+					 if (CAN_IN_RX_QUEUE > can_Rx_max) can_Rx_max = CAN_IN_RX_QUEUE;
+					 can_Rx_produce_count++;
+				  }
+				}
+	 break;
+	 case 2: CAN_EVENT = 1;
+	 break;
+	 default:
+	 break;
+  }
+}

@@ -1,0 +1,5 @@
+out*
+misc/*.rdbg
+misc/output*
+misc/tests*
+misc/vtune*

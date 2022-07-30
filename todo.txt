@@ -1,0 +1,27 @@
+the x in 0x123 will get highlighted in a search for "x" with identifier-only matching
+When reopening a file from disk, try not to scroll all the way back to the top, because bruh
+
+'to lower case' / 'toggle case' command
+
+Make vb repeatable again
+Pretend we are a tty so printf works without fflush when running in the internal console
+Track when a file gets renamed in the file explorer?
+path_compare breaks with renamed files
+
+ShowOpenFileDialog doesn't seem to work when environment is set via CreateProcess
+
+Caret position history (doesn't need to work for selections or respect undo, but we need to offset them in OffsetCarets)
+Entering "move-mode" inside a COMMAND ui element
+Show trailing spaces (& maybe be less aggressive about removing trailing whitespace automatically?)
+Retabbing files
+
+Parse declaration locations
+Highlight identifiers if we know about their declaration
+Overview of declarations
+
+Mouse picking in file dialog
+
+Show unsaved changes marker based on whether there actually are any differences. I don't want to keep around a full copy of the data and diff it. We could try hashing the file and comparing the hashes. Not sure how fast that would be. Look into meow hash? We could also use this to verify whether external changes actually changed file contents.
+Maybe show warning when trying edit/save a non-file-backed buffer (also, ctrl-w acts as w in a non-editable buffer, which is a bit confusing)
+
+Inserting arbitrary unicode codepoints or bytes via 'insert special character' command
