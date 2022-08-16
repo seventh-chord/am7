@@ -1763,8 +1763,7 @@ IoError buffer_load(Buffer *buffer)
         buffer->history_caret = 0;
 
 
-        // Guess newline mode and tab width
-        // This is slightly silly, because it is based on virtual lines, so it will get messed up if we open the buffer in a messed-up resolution the first time.
+        // Decide on newline mode and tab width
         s32 tab_count = 0;
         s32 leading_space_count[TAB_WIDTH_MAX*2] = {0};
 
@@ -1772,36 +1771,34 @@ IoError buffer_load(Buffer *buffer)
         s32 cr_count = 0;
         s32 crlf_count = 0;
 
-        for (s32 i = 0; i < min(buffer->lines.length, 1024); ++i) {
-            VirtualLine *line = &buffer->lines[i];
-            str text = buffer_get_virtual_line_text(buffer, i);
+        {
+            char *start = buffer->data;
+            char *end = buffer->data + buffer->a; // Note (Morten): This loop is ok because we manually set up the data for the buffer further up in this function.
 
-            if (line->virtual_indent == 0) {
-                if (text.length > 0 && text[0] == '\t') {
+            while (start < end) {
+                // Count spaces or tab at line start
+                if (*start == '\t') {
                     ++tab_count;
                 } else {
-                    s32 leading_spaces = 0;
-                    while (leading_spaces <= alen(leading_space_count) &&
-                           leading_spaces < text.length &&
-                           text[leading_spaces] == ' ')
-                    {
-                        ++leading_spaces;
-                    }
-
-                    if (leading_spaces <= alen(leading_space_count)) {
-                        leading_space_count[leading_spaces - 1] += 1;
-                    }
+                    s32 space_count = 0;
+                    while (space_count <= alen(leading_space_count) && start < end && *start == ' ') ++start, ++space_count;
+                    if (space_count) leading_space_count[space_count - 1] += 1;
                 }
-            }
 
-            if (line->flags & VirtualLine::ENDS_IN_ACTUAL_NEWLINE) {
-                if (text.length >= 2 && text[text.length - 2] == '\r' && text[text.length - 1] == '\n') {
-                    ++crlf_count;
-                } else if (text.length >= 1) {
-                    if (text[text.length - 1] == '\r') {
-                        ++cr_count;
-                    } else if (text[text.length - 1] == '\n') {
+                // Find line ending
+                while (start < end) {
+                    char c = *start++;
+                    if (c == '\n') {
                         ++lf_count;
+                        break;
+                    } else if (c == '\r') {
+                        if (start < end && *start == '\n') {
+                            ++crlf_count;
+                            ++start;
+                        } else {
+                            ++lf_count;
+                        }
+                        break;
                     }
                 }
             }
@@ -1831,23 +1828,22 @@ IoError buffer_load(Buffer *buffer)
             }
         }
 
-        s32 indent_types = 0;
+        s32 newline_modes = 0;
         if (lf_count > 0) {
-            ++indent_types;
+            ++newline_modes;
             buffer->newline_mode = NewlineMode::LF;
         }
         if (cr_count > 0) {
-            ++indent_types;
+            ++newline_modes;
             buffer->newline_mode = NewlineMode::CR;
         }
         if (crlf_count > 0) {
-            ++indent_types;
+            ++newline_modes;
             buffer->newline_mode = NewlineMode::CRLF;
         }
-        if (indent_types > 1) {
-            debug_printf("Multiple different newline types seen (%i LF, %i CR, %i CRLF)\n", lf_count, cr_count, crlf_count);
+        if (newline_modes > 1) {
+            debug_printf("Multiple different line ending styles seen (%i LF, %i CR, %i CRLF)\n", lf_count, cr_count, crlf_count);
         }
-        debug_printf("Multiple different newline types seen (%i LF, %i CR, %i CRLF)\n", lf_count, cr_count, crlf_count);
     }
 
     return(error);
