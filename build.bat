@@ -23,6 +23,9 @@ if defined flag (
         set release=1
         goto parse_flags
     )
+    if "%flag%"=="debug" (
+        goto parse_flags
+    )
     if "%flag%"=="clang" (
         set use_clang=1
         goto parse_flags
@@ -52,8 +55,6 @@ if /I %release%==0 (
     set executable=C:\Dev\tools\am7.exe
 )
 echo Writing executable to %executable%
-
-..\ctime\ctime -begin timings.ctm
 
 if /I %use_clang%==1 ( goto build_clang ) else ( goto build_msvc )
 
@@ -99,12 +100,10 @@ goto after_build
 
 :after_build
 
-..\ctime\ctime -end timings.ctm %err%
-
 if %err% neq 0 (
     echo Build failed
     exit /b %err%
 )
 
-if /I %release%==0 ( out\am7 )
-if %errorlevel% neq 0 exit /b %errorlevel%
+REM if /I %release%==0 ( out\am7 )
+REM if %errorlevel% neq 0 exit /b %errorlevel%
