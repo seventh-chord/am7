@@ -714,6 +714,8 @@ extern "C"
     __declspec(dllimport)
     void *OpenProcess(u32 Access, s32 Inherit, u32 ProcessId);
     __declspec(dllimport)
+    s32 QueryFullProcessImageNameW(void *Process, u32 Flags, wchar_t *ExeName, u32 *Size);
+    __declspec(dllimport)
     u32 GetModuleFileNameW(void *Module, wchar_t *Buffer, u32 Size);
     __declspec(dllimport)
     s32 PathIsDirectoryW(wchar_t *Path);

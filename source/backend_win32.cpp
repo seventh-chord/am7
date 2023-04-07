@@ -601,8 +601,6 @@ bool prompt_with_dialog(str title, str message)
 
 struct ScriptWaitThreadParameters
 {
-    void *io_port;
-    void *job_object;
     void *pipe;
     u32 receive_thread_id;
     void *process;
@@ -634,7 +632,7 @@ u32 _script_wait_thread_routine(void *parameter)
         } else {
             u32 error = win32::GetLastError();
             if (error == win32::ERROR_BROKEN_PIPE) {
-                // The initial process has died, now wait for the job to complete
+                // The initial process has died
                 break;
             } else {
                 ScriptWaitMessage *message = (ScriptWaitMessage *) heap_alloc(sizeof(ScriptWaitMessage));
@@ -646,50 +644,43 @@ u32 _script_wait_thread_routine(void *parameter)
         }
     }
 
-    while (1) {
-        u32 code = 0;
-        u64 key = 0;
-        win32::overlapped *overlapped = 0;
-
-        bool wait_result = win32::GetQueuedCompletionStatus(parameters.io_port, &code, &key, &overlapped, U32_MAX);
-        if (!wait_result) {
-            u32 error = win32::GetLastError();
-            if (error == 0) error = U32_MAX;
-
-            ScriptWaitMessage *message = (ScriptWaitMessage *) heap_alloc(sizeof(ScriptWaitMessage));
-            message->kind = ScriptWaitMessage::FAILED;
-            message->error_code = error;
-            if (!win32::PostThreadMessageW(parameters.receive_thread_id, win32::WM_APP, (u64) message, 0)) goto post_failed;
-
-            goto done;
-        } else {
-            if (key == (u64) parameters.job_object && code == win32::JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO) {
-                u32 exit_code = 0;
-                win32::GetExitCodeProcess(parameters.process, &exit_code);
-
-                ScriptWaitMessage *message = (ScriptWaitMessage *) heap_alloc(sizeof(ScriptWaitMessage));
-                message->kind = ScriptWaitMessage::DONE;
-                message->exit_code = exit_code;
-                if (!win32::PostThreadMessageW(parameters.receive_thread_id, win32::WM_APP, (u64) message, 0)) goto post_failed;
-
-                break;
-            }
-
-            /*  
-            // See comment on JOB_OBJECT_LIMIT_BREAKAWAY_OK further down.
-            struct IdList
-            {
-                u32 NumberOfAssignedProcesses;
-                u32 NumberOfProcessIdsInList;
-                u64 ProcessIdList[64];
-            };
-            IdList id_list;
-            id_list.NumberOfAssignedProcesses = alen(id_list.ProcessIdList);
-            id_list.NumberOfProcessIdsInList = 0;
-            u32 returned_len;
-            s32 ok = win32::QueryInformationJobObject(parameters.job_object, win32::JobObjectBasicProcessIdList, &id_list, sizeof(id_list), &returned_len);
-            */
-        }
+    // Note (Morten, 2023-04-07) Previously, I was waiting for the entire job-tree to stop, as described here:
+    // https://devblogs.microsoft.com/oldnewthing/20130405-00/?p=4743. However, I kept having trouble with
+    // this approach, because when running cl.exe it will sometimes spawn processes such as "vctip.exe" and
+    // "mspdbsrv.exe", which are intended to keep on running in the background (or maybe they are just buggy
+    // and fail to terminate, but at least having them running doesn't seem to mess with the next compilation).
+    // But these processes also become part of the job object, and we end up waiting forever for them to exit.
+    // For a while I was working around this by deleting "vctip.exe", because it's just some telemtry bullshit
+    // anyways. But I'm not sure whether that would be a good idea to do for "mspdbsrv.exe".
+    //
+    // Instead, I now just wait for the root process which was started to exit. The handle to the job object
+    // then gets closed when the main thread of am7 receives ScriptWaitMessage::DONE/FAILED. Whereas I previously
+    // had JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE set on the job object, I no longer do this. This means that the
+    // job object will stick around until mspdbsrv or whatever terminates, but that doesn't cause issues for am7.
+    // I can close am7 while mspdbsrv keeps running under the job object, even though there are no user-space handles
+    // left to the job object.
+    //
+    // Note that I still want the job object, because it allows me to call TerminateJobObject to kill whatever
+    // script is being run, plus all children. This is good in case I e.g. have a build.bat script which launches
+    // some buggy exe which busyloops, because I can quickly kill everything without having to muck around with
+    // finding the processes in processexplorer / taskmanager.
+    u32 wait_result = win32::WaitForSingleObject(parameters.process, 0xffffffff);
+    if (wait_result == win32::WAIT_OBJECT_0) {
+        u32 exit_code = 0;
+        win32::GetExitCodeProcess(parameters.process, &exit_code);
+  
+        ScriptWaitMessage *message = (ScriptWaitMessage *) heap_alloc(sizeof(ScriptWaitMessage));
+        message->kind = ScriptWaitMessage::DONE;
+        message->exit_code = exit_code;
+        if (!win32::PostThreadMessageW(parameters.receive_thread_id, win32::WM_APP, (u64) message, 0)) goto post_failed;
+    } else {    
+        u32 error = win32::GetLastError();
+        if (error == 0) error = U32_MAX;
+  
+        ScriptWaitMessage *message = (ScriptWaitMessage *) heap_alloc(sizeof(ScriptWaitMessage));
+        message->kind = ScriptWaitMessage::FAILED;
+        message->error_code = error;
+        if (!win32::PostThreadMessageW(parameters.receive_thread_id, win32::WM_APP, (u64) message, 0)) goto post_failed;
     }
 
     if (false) {
@@ -698,15 +689,9 @@ u32 _script_wait_thread_routine(void *parameter)
         fail("Couldn't send post script message (%xh)\n", error);
     }
 
-done:
-    win32::TerminateJobObject(parameters.job_object, 0);
-    win32::CloseHandle(parameters.job_object);
-
-    win32::CloseHandle(parameters.io_port);
-
+    done:;
     win32::CancelIo(parameters.pipe);
     win32::CloseHandle(parameters.pipe);
-
     win32::CloseHandle(parameters.process);
 
     return(0);
@@ -729,9 +714,10 @@ void _script_handle_message(ScriptWaitMessage *message)
         {
             win32::WaitForSingleObject(backend.script_wait_thread, U32_MAX);
             win32::CloseHandle(backend.script_wait_thread);
-
-            backend.script_job = null;
             backend.script_wait_thread = null;
+
+            win32::CloseHandle(backend.script_job);
+            backend.script_job = null;
 
             stack_enter_frame();
             str text;
@@ -760,12 +746,6 @@ void start_script(Path script_path)
 
         on_script_output(stack_printf("Launching %s\n", path_to_str(script_path).data));
 
-        void *io_port = win32::CreateIoCompletionPort((void *) -1, null, 0, 1);
-        if (!io_port) {
-            u32 error = win32::GetLastError();
-            fail("Couldn't create io port for script (%u)\n", error);
-        }
-
         void *job = win32::CreateJobObjectW(null, null);
         if (!job) {
             u32 error = win32::GetLastError();
@@ -773,34 +753,9 @@ void start_script(Path script_path)
         }
         win32::jobobject_extended_limit_information job_settings = {};
         job_settings.BasicLimitInformation.LimitFlags =
-            win32::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
             win32::JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION |
-            
-            // Note (Morten, 2023-04-07) I added this because I started seeing builds not completing, even though
-            // the build script had exited. I added some code (commented out) in '_script_wait_thread_routine'
-            // which fetches the list of processes attached to a job object. Checking the list with the debugger
-            // and finding the process name with processexplorer showed that "mspdbsrv.exe" was blocking us.
-            //
-            // Adding these flags seems to fix the issue. I haven't thought about it much, but it sounds reasonable
-            // that this would work, since it appears that "mspdbsrv.exe" is supposed to stay running in the background
-            // anyways.
-            //
-            // I think I have had simmilar issues with "vstip.exe" in the past, but then I've solved it by simply
-            // deleting "vctip.exe".
-            //
-            // If this solution ends up not working perhaps I have to create some blacklist of executables and
-            // check if all that is preventing the job from terminating is one of those, and then force-kill them.
-            // I added some code to see why the 
-            win32::JOB_OBJECT_LIMIT_BREAKAWAY_OK |
-            win32::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+            win32::JOB_OBJECT_LIMIT_BREAKAWAY_OK;
         if (!win32::SetInformationJobObject(job, win32::JobObjectExtendedLimitInformation, (void *) &job_settings, sizeof(job_settings))) {
-            u32 error = win32::GetLastError();
-            fail("Couldn't configure job for script execution (%u)\n", error);
-        }
-        win32::jobobject_associate_completion_port job_port_link = {};
-        job_port_link.Key = job;
-        job_port_link.Port = io_port;
-        if (!win32::SetInformationJobObject(job, win32::JobObjectAssociateCompletionPortInformation, (void *) &job_port_link, sizeof(job_port_link))) {
             u32 error = win32::GetLastError();
             fail("Couldn't configure job for script execution (%u)\n", error);
         }
@@ -873,7 +828,6 @@ void start_script(Path script_path)
             on_script_output(message);
 
             win32::CloseHandle(job);
-            win32::CloseHandle(io_port);
             win32::CloseHandle(receive_pipe);
         }
 
@@ -883,8 +837,6 @@ void start_script(Path script_path)
             win32::AssignProcessToJobObject(job, process_info.ProcessHandle);
 
             ScriptWaitThreadParameters *parameters = (ScriptWaitThreadParameters *) heap_alloc(sizeof(ScriptWaitThreadParameters));
-            parameters->io_port = io_port;
-            parameters->job_object = job;
             parameters->pipe = receive_pipe;
             parameters->receive_thread_id = win32::GetCurrentThreadId();
             parameters->process = process_info.ProcessHandle;
