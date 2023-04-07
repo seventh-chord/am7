@@ -362,6 +362,13 @@ struct jobobject_associate_completion_port
     void *Port;
 };
 
+struct jobobject_basic_process_id_list
+{
+  u32 NumberOfAssignedProcesses;
+  u32 NumberOfProcessIdsInList;
+  u64 ProcessIdList[1];
+};
+
 struct systemtime
 {
     u16 Year;
@@ -690,6 +697,8 @@ extern "C"
     s32 AssignProcessToJobObject(void *Job, void *Process);
     __declspec(dllimport)
     s32 SetInformationJobObject(void *Job, s32 InfoClass, void *Info, u32 InfoLength);
+    __declspec(dllimport)
+    s32 QueryInformationJobObject(void *Job, s32 InfoClass, void *Info, u32 InfoLength, u32 *ReturnLength);
     __declspec(dllimport)
     u32 ResumeThread(void *Thread);
     __declspec(dllimport)
@@ -1106,10 +1115,13 @@ enum {
     FILE_FLAG_WRITE_THROUGH = 0x80000000,
     FILE_FLAG_OVERLAPPED = 0x40000000,
     JobObjectBasicLimitInformation = 2,
+    JobObjectBasicProcessIdList = 3,
     JobObjectExtendedLimitInformation = 9,
     JobObjectAssociateCompletionPortInformation = 7,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000,
     JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION = 0x00000400,
+    JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800,
+    JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK = 0x00001000,
     JOB_OBJECT_MSG_END_OF_JOB_TIME          = 1,
     JOB_OBJECT_MSG_END_OF_PROCESS_TIME      = 2,
     JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT     = 3,

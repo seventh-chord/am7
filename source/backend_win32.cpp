@@ -650,7 +650,9 @@ u32 _script_wait_thread_routine(void *parameter)
         u32 code = 0;
         u64 key = 0;
         win32::overlapped *overlapped = 0;
-        if (!win32::GetQueuedCompletionStatus(parameters.io_port, &code, &key, &overlapped, U32_MAX)) {
+
+        bool wait_result = win32::GetQueuedCompletionStatus(parameters.io_port, &code, &key, &overlapped, U32_MAX);
+        if (!wait_result) {
             u32 error = win32::GetLastError();
             if (error == 0) error = U32_MAX;
 
@@ -672,6 +674,21 @@ u32 _script_wait_thread_routine(void *parameter)
 
                 break;
             }
+
+            /*  
+            // See comment on JOB_OBJECT_LIMIT_BREAKAWAY_OK further down.
+            struct IdList
+            {
+                u32 NumberOfAssignedProcesses;
+                u32 NumberOfProcessIdsInList;
+                u64 ProcessIdList[64];
+            };
+            IdList id_list;
+            id_list.NumberOfAssignedProcesses = alen(id_list.ProcessIdList);
+            id_list.NumberOfProcessIdsInList = 0;
+            u32 returned_len;
+            s32 ok = win32::QueryInformationJobObject(parameters.job_object, win32::JobObjectBasicProcessIdList, &id_list, sizeof(id_list), &returned_len);
+            */
         }
     }
 
@@ -755,7 +772,27 @@ void start_script(Path script_path)
             fail("Couldn't create job for script execution (%u)\n", error);
         }
         win32::jobobject_extended_limit_information job_settings = {};
-        job_settings.BasicLimitInformation.LimitFlags = win32::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | win32::JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+        job_settings.BasicLimitInformation.LimitFlags =
+            win32::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+            win32::JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION |
+            
+            // Note (Morten, 2023-04-07) I added this because I started seeing builds not completing, even though
+            // the build script had exited. I added some code (commented out) in '_script_wait_thread_routine'
+            // which fetches the list of processes attached to a job object. Checking the list with the debugger
+            // and finding the process name with processexplorer showed that "mspdbsrv.exe" was blocking us.
+            //
+            // Adding these flags seems to fix the issue. I haven't thought about it much, but it sounds reasonable
+            // that this would work, since it appears that "mspdbsrv.exe" is supposed to stay running in the background
+            // anyways.
+            //
+            // I think I have had simmilar issues with "vstip.exe" in the past, but then I've solved it by simply
+            // deleting "vctip.exe".
+            //
+            // If this solution ends up not working perhaps I have to create some blacklist of executables and
+            // check if all that is preventing the job from terminating is one of those, and then force-kill them.
+            // I added some code to see why the 
+            win32::JOB_OBJECT_LIMIT_BREAKAWAY_OK |
+            win32::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
         if (!win32::SetInformationJobObject(job, win32::JobObjectExtendedLimitInformation, (void *) &job_settings, sizeof(job_settings))) {
             u32 error = win32::GetLastError();
             fail("Couldn't configure job for script execution (%u)\n", error);
