@@ -45,6 +45,7 @@ struct NamedHighlightFunction
 };
 
 HighlightList *highlight_c(str line, HighlightState *state);
+HighlightList *highlight_asm(str line, HighlightState *state);
 HighlightList *highlight_python(str line, HighlightState *state);
 HighlightList *highlight_odin(str line, HighlightState *state);
 HighlightList *highlight_bat(str line, HighlightState *state);
@@ -55,6 +56,7 @@ NamedHighlightFunction HIGHLIGHT_FUNCTIONS[] = {
     { "Python", &highlight_python, { lit_to_str("py") } },
     { "Odin", &highlight_odin, { lit_to_str("odin") } },
     { "Batch scripts", &highlight_bat, { lit_to_str("bat"), lit_to_str("cmd") } },
+    { "Assembly", &highlight_asm, { lit_to_str("asm"), lit_to_str("s") } },
 };
 
 s32 highlight_get_function_index(str ext) {
@@ -743,6 +745,32 @@ HighlightList *highlight_python(str line, HighlightState *state)
             }
             i += max(number.length, 1);
 
+        } else {
+            ++i;
+        }
+    }
+
+    #undef list_add
+    return(result);
+}
+
+HighlightList *highlight_asm(str line, HighlightState *state)
+{
+    HighlightList *result = null;
+    HighlightList *last = null;
+    #define list_add() (last = ((last? last->next : result) = stack_alloc(HighlightList, 1)), &last->highlight) // c is nice :)
+
+    for (s32 i = 0; i < line.length; ) {
+        char a = line[i];
+        if (is_newline(a)) {
+            i = line.length;
+        } else if (a == ';') {
+            Highlight *entry = list_add();
+            entry->kind = HighlightKind::Comment;
+            entry->start = i;
+            entry->end = line.length;
+            while (entry->end > entry->start && is_newline(line[entry->end - 1])) --entry->end;
+            i = line.length;
         } else {
             ++i;
         }
