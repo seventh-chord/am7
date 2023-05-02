@@ -1516,22 +1516,28 @@ void on_typed(s32 codepoint, bool control, bool shift)
             history_insert_sentinel(buffer);
             app.last_action = LAST_ACTION_DELETE;
 
-            stack_enter_frame();
             arena_reset(&app.clipboard_arena);
             app.clipboard = arena_make_slice(&app.clipboard_arena, str, view->selections.length);
 
-            str full = {};
+            stack_enter_frame(); // stack frame because 'buffer_get_slice' allocates if selection stradles gap
+            // It probably would be cleaner to have buffer_get_slice copy into the arena for us :^)
 
             for (s32 i = 0; i < view->selections.length; ++i) {
                 Selection focused_selection = view->selections[i];
                 str outtake = buffer_get_slice(buffer, focused_selection.start.offset, focused_selection.end.offset);
-
                 app.clipboard[i] = arena_copy(&app.clipboard_arena, outtake);
+            }
 
-                if (view->selections.length == 1) {
-                    full = outtake;
-                } else {
-                    stack_printf_append(&full, "%.*s\n", str_fmt(outtake));
+            stack_leave_frame();
+            stack_enter_frame(); // stack frame for concatenating to build 'full'
+
+            str full;
+            if (app.clipboard.length == 1) {
+                full = app.clipboard[0];
+            } else {
+                full = {};
+                for_each (part, app.clipboard) {
+                    stack_printf_append(&full, "%.*s\n", str_fmt(*part));
                 }
             }
 
