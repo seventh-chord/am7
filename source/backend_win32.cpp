@@ -426,8 +426,8 @@ s64 my_window_proc(void *window_handle, s32 message, u64 w, s64 l)
             bool control = w & win32::MK_CONTROL;
             bool shift = w & win32::MK_SHIFT;
 
-            s32 sx = l & 0xffff;
-            s32 sy = (l >> 16) & 0xffff;
+            s32 sx = (s32) (s16) (l & 0xffff);
+            s32 sy = (s32) (s16) ((l >> 16) & 0xffff);
             win32::point Point = { sx, sy };
             win32::ScreenToClient(window_handle, &Point);
             s32 x = Point.X;
