@@ -788,9 +788,6 @@ extern "C"
     __declspec(dllimport)
     void *GetProcessHeap();
 
-    __declspec(dllimport)
-    int GetKeyNameTextA(s32 ScanCode, char *String, int Size);
-
     unsigned long _exception_code();
 };
 

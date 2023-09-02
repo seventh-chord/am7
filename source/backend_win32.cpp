@@ -357,38 +357,38 @@ s64 my_window_proc(void *window_handle, s32 message, u64 w, s64 l)
             bool shift = win32::GetKeyState(win32::VK_SHIFT) & 0x8000;
             bool alt = win32::GetKeyState(win32::VK_MENU) & 0x8000;
 
-            s32 key = 0;
+            s32 Key = 0;
             switch (w) {
-                case win32::VK_PRIOR:    key = CHAR_PAGE_UP; break;
-                case win32::VK_NEXT:     key = CHAR_PAGE_DOWN; break;
-                case win32::VK_END:      key = CHAR_END; break;
-                case win32::VK_HOME:     key = CHAR_HOME; break;
-                case win32::VK_LEFT:     key = CHAR_LEFT; break;
-                case win32::VK_UP:       key = CHAR_UP; break;
-                case win32::VK_RIGHT:    key = CHAR_RIGHT; break;
-                case win32::VK_DOWN:     key = CHAR_DOWN; break;
-                case win32::VK_DELETE:   key = CHAR_DELETE; break;
-                case win32::VK_INSERT:   key = CHAR_INSERT; break;
-                case win32::VK_RETURN:   key = '\r'; break;
-                case win32::VK_TAB:      key = '\t'; break;
-                case win32::VK_BACK:     key = '\b'; break;
-                case win32::VK_F1:       key = CHAR_F1; break;
-                case win32::VK_F2:       key = CHAR_F2; break;
-                case win32::VK_F3:       key = CHAR_F3; break;
-                case win32::VK_F4:       key = CHAR_F4; break;
-                case win32::VK_F5:       key = CHAR_F5; break;
-                case win32::VK_F6:       key = CHAR_F6; break;
-                case win32::VK_F7:       key = CHAR_F7; break;
-                case win32::VK_F8:       key = CHAR_F8; break;
-                case win32::VK_F9:       key = CHAR_F9; break;
-                case win32::VK_F10:      key = CHAR_F10; break;
-                case win32::VK_F11:      key = CHAR_F11; break;
-                case win32::VK_F12:      key = CHAR_F12; break;
+                case win32::VK_PRIOR:    Key = CHAR_PAGE_UP; break;
+                case win32::VK_NEXT:     Key = CHAR_PAGE_DOWN; break;
+                case win32::VK_END:      Key = CHAR_END; break;
+                case win32::VK_HOME:     Key = CHAR_HOME; break;
+                case win32::VK_LEFT:     Key = CHAR_LEFT; break;
+                case win32::VK_UP:       Key = CHAR_UP; break;
+                case win32::VK_RIGHT:    Key = CHAR_RIGHT; break;
+                case win32::VK_DOWN:     Key = CHAR_DOWN; break;
+                case win32::VK_DELETE:   Key = CHAR_DELETE; break;
+                case win32::VK_INSERT:   Key = CHAR_INSERT; break;
+                case win32::VK_RETURN:   Key = '\r'; break;
+                case win32::VK_TAB:      Key = '\t'; break;
+                case win32::VK_BACK:     Key = '\b'; break;
+                case win32::VK_F1:       Key = CHAR_F1; break;
+                case win32::VK_F2:       Key = CHAR_F2; break;
+                case win32::VK_F3:       Key = CHAR_F3; break;
+                case win32::VK_F4:       Key = CHAR_F4; break;
+                case win32::VK_F5:       Key = CHAR_F5; break;
+                case win32::VK_F6:       Key = CHAR_F6; break;
+                case win32::VK_F7:       Key = CHAR_F7; break;
+                case win32::VK_F8:       Key = CHAR_F8; break;
+                case win32::VK_F9:       Key = CHAR_F9; break;
+                case win32::VK_F10:      Key = CHAR_F10; break;
+                case win32::VK_F11:      Key = CHAR_F11; break;
+                case win32::VK_F12:      Key = CHAR_F12; break;
             }
 
-            if (key != 0) {
+            if (Key != 0) {
                 result = 0;
-                on_typed(key, control, shift);
+                on_typed(Key, control, shift);
                 request_redraw();
             } else if (w >= 'A' && w <= 'Z' && control && !alt) {
                 s32 codepoint = w;

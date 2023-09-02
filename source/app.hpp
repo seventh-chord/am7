@@ -2053,7 +2053,7 @@ bool draw_buffer(DrawTargetSlice canvas, Buffer *buffer, View *view, bool focuse
     return(animating);
 }
 
-bool draw_buffer_and_status(DrawTargetSlice canvas, s32 split)
+bool draw_buffer_and_status(DrawTargetSlice canvas, s32 Split)
 {
     stack_enter_frame();
 
@@ -2068,15 +2068,15 @@ bool draw_buffer_and_status(DrawTargetSlice canvas, s32 split)
     DrawTargetSlice text_canvas = draw_target_slice(&canvas, 0, 0, canvas_width, canvas_height - status_height);
     DrawTargetSlice status_canvas = draw_target_slice(&canvas, MARGIN, canvas_height - (app.font.metrics.line_height + 2*MARGIN), canvas_width - MARGIN, canvas_height);
 
-    s32 buffer_index = app.splits[split].buffer_index;
+    s32 buffer_index = app.splits[Split].buffer_index;
     Buffer *buffer = &app.buffers[buffer_index];
-    View *view = &buffer->views[app.splits[split].view_index];
-    bool focused = split == app.focused_split && !app.prompt.showing;
-    app.splits[split].screen_rect = text_canvas.area;
+    View *view = &buffer->views[app.splits[Split].view_index];
+    bool focused = Split == app.focused_split && !app.prompt.showing;
+    app.splits[Split].screen_rect = text_canvas.area;
 
     animating |= draw_buffer(text_canvas, buffer, view, focused);
 
-    if (split == app.focused_split && app.prompt.showing) {
+    if (Split == app.focused_split && app.prompt.showing) {
         DrawTargetSlice command_text_canvas = draw_target_slice(&canvas, 0, canvas_height - (app.font.metrics.line_height + MARGIN), canvas_width, canvas_height - MARGIN);
         app.command_prompt_screen_rect = command_text_canvas.area;
 
@@ -2179,109 +2179,6 @@ bool draw_buffer_and_status(DrawTargetSlice canvas, s32 split)
     return(animating);
 }
 
-
-
-// Position and width in units of 1/4 1U key.
-struct PhysicalKeys
-{
-  s32 x0;
-  s32 y0;
-  s32 key_width;
-  s32 scancode_first;
-  s32 key_count;
-};
-
-enum {
-  PHYSICAL_KEYS_UNIT_WIDTH = 4,
-  PHYSICAL_KEYS_TOTAL_WIDTH = 60,
-  PHYSICAL_KEYS_TOTAL_HEIGHT = 26,
-};
-
-static PhysicalKeys PHYSICAL_KEYS[] = {
-  // The names I've written in comments are what the keys are on my keyboard.
-  // On other keyboards, they might be completely different. 
-  // The scancodes are taken from a table on this page:
-  // https://learn.microsoft.com/en-us/windows/win32/inputdev/about-keyboard-input#scan-codes
-  {  0,  0,  4, 0x01,  1 }, // escape
-  {  8,  0,  4, 0x3b,  4 }, // F1-F4
-  { 26,  0,  4, 0x3f,  4 }, // F5-F8
-  { 44,  0,  4, 0x43,  2 }, // F9-F10
-  { 52,  0,  4, 0x57,  2 }, // F11-F12 (discontiguous scan codes...)
-  {  0,  6,  4, 0x29,  1 }, // |, number keys
-  {  4,  6,  4, 0x02, 12 }, // number keys, plus two symbols
-  { 52,  6,  8, 0x0e,  1 }, // backspace
-  {  0, 10,  6, 0x0f,  1 }, // tab
-  {  6, 10,  4, 0x10, 12 }, // first row of letters, plus å and ¨
-  {  0, 14,  7, 0x3a,  1 }, // caps
-  {  7, 14,  4, 0x1e, 11 }, // second row of letters, plus ø and æ
-  {  9, 18,  4, 0x2c, 10 }, // third row of letters, plus comma, dot and hyphen
-  {  0, 22,  5, 0x1d,  1 }, // left ctrl
-                            // windows key between left ctrl and left alt
-  { 10, 22,  5, 0x38,  1 }, // left alt
-  { 15, 22, 25, 0x39,  1 }, // space
-  { 40, 22,  5, 0x38,  1 }, // right alt (actually 0xe038, 0x38 is left alt)
-                            // windows key and fn between right alt and right ctrl
-  { 55, 22,  5, 0x1d,  1 }, // right ctrl (actually 0xe01d, 0x1d is right ctrl)
-
-  // TODO enter key
-  { 54, 10,  6, 0x2b,  1 },
-  { 51, 14,  4, 0x2b,  1 },
-  { 55, 14,  5, 0x1c,  1 },
-
-  // TODO right shift is two keys some keyboards
-  { 49, 18, 11, 0x36,  1 }, // right shift
-
-  // TODO left shift is one key on some keyboards
-  {  0, 18,  5, 0x2a,  1 }, // left shift
-  {  5, 18,  4, 0x56,  1 }, // extra key to the right of left shift
-};
-
-
-void draw_keyboard_input_helper(DrawTargetSlice canvas)
-{
-    s32 width = canvas.area.x1 - canvas.area.x0;
-    s32 height = canvas.area.y1 - canvas.area.y0;
-
-    s32 scale_numerator, scale_denominator;
-    s32 unit_width = PHYSICAL_KEYS_TOTAL_WIDTH + 2*PHYSICAL_KEYS_UNIT_WIDTH;
-    s32 unit_height = PHYSICAL_KEYS_TOTAL_HEIGHT + 2*PHYSICAL_KEYS_UNIT_WIDTH;
-    if (width*unit_height > height*unit_width) {
-        scale_numerator = height;
-        scale_denominator = unit_height;
-    } else {
-        scale_numerator = width;
-        scale_denominator = unit_width;
-    }
-
-    s32 margin = PHYSICAL_KEYS_UNIT_WIDTH*(1*scale_numerator)/(16*scale_denominator);
-
-    s32 x0 = (width - PHYSICAL_KEYS_TOTAL_WIDTH*scale_numerator/scale_denominator)/2;
-    s32 y0 = (height - PHYSICAL_KEYS_TOTAL_HEIGHT*scale_numerator/scale_denominator)/2;
-
-    for (s32 keys_index = 0; keys_index < alen(PHYSICAL_KEYS); ++keys_index) {
-        PhysicalKeys *keys = &PHYSICAL_KEYS[keys_index];
-        for (s32 key_index = 0; key_index < keys->key_count; ++key_index) {
-            s32 key_x0 = x0 + (keys->x0 + key_index*keys->key_width)*scale_numerator/scale_denominator;
-            s32 key_x1 = key_x0 + keys->key_width*scale_numerator/scale_denominator;
-
-            s32 key_y0 = y0 + keys->y0*scale_numerator/scale_denominator;
-            s32 key_y1 = key_y0 + PHYSICAL_KEYS_UNIT_WIDTH*scale_numerator/scale_denominator;
-
-            key_x0 += margin;
-            key_x1 -= margin;
-            key_y0 += margin;
-            key_y1 -= margin;
-
-
-            char name[64];
-            win32::GetKeyNameTextA((1 << 25) | ((keys->scancode_first + key_index) << 16), name, sizeof(name));
-
-            draw_solid(&canvas, key_x0, key_y0, key_x1, key_y1, 0xff0000);
-            draw_text_ellipsis(&canvas, &app.font, cstring_to_str(name), key_x0, key_x1, key_y0, 0xffffff, false);
-        }
-    }
-}
-
 bool redraw(DrawTargetSlice canvas)
 {
     s32 top = 0;
@@ -2333,9 +2230,6 @@ bool redraw(DrawTargetSlice canvas)
         app.max_glyphs_per_line = (width - 2*MARGIN) / app.font.metrics.advance;
         animating |= draw_buffer_and_status(canvas_full, 0);
     }
-
-
-    draw_keyboard_input_helper(canvas);
 
     return(animating);
 }
