@@ -625,10 +625,16 @@ u32 _script_wait_thread_routine(void *parameter)
             memcpy(message->output.data, read_buffer, bytes_read);
             if (!win32::PostThreadMessageW(parameters.receive_thread_id, win32::WM_APP, (u64) message, 0)) goto post_failed;
 
+            // TODO (Morten, 2023-09-02) I don't think this sleep is a good idea. It is slowing down am7 a lot in some cases
+            // (specifically 2309_odin_bignum/bignum.exe). I think a better implementation would issue ReadFile asynchronously
+            // using overlapped IO and then do WaitOnSingleObject with a timeout (depending on whether we already have some bytes
+            // or not).
+            // But I would have to investigate a bit before implementing that.
+
             // Note (Morten, 2020-11-08) We don't want to spam a bunch of messages when the script process does a lot of small writes, so we wait a brief moment to let the buffer fill up
-            if (bytes_read != sizeof(read_buffer)) {
-                win32::Sleep(10);
-            }
+            //if (bytes_read != sizeof(read_buffer)) {
+            //    win32::Sleep(10);
+            //}
         } else {
             u32 error = win32::GetLastError();
             if (error == win32::ERROR_BROKEN_PIPE) {
@@ -763,7 +769,7 @@ void start_script(Path script_path)
         str pipe_name = stack_printf("\\\\.\\pipe\\am7_script_pipe_%u", win32::GetCurrentProcessId());
         wchar_t *pipe_name_w = utf8_to_utf16(pipe_name).data;
 
-        void *receive_pipe = win32::CreateNamedPipeW(pipe_name_w, win32::PIPE_ACCESS_INBOUND | win32::FILE_FLAG_FIRST_PIPE_INSTANCE, 0, 2, 0, 4096, 0, null);
+        void *receive_pipe = win32::CreateNamedPipeW(pipe_name_w, win32::PIPE_ACCESS_INBOUND | win32::FILE_FLAG_FIRST_PIPE_INSTANCE, 0, 2, 4096, 4096, 0, null);
         if (receive_pipe == ((void *) -1)) {
             u32 error = win32::GetLastError();
             fail("Couldn't create server pipe for script execution (%u)\n", error);

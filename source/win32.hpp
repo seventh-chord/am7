@@ -500,6 +500,8 @@ extern "C"
     __declspec(dllimport)
     s32 QueryPerformanceCounter(s64 *Result);
     __declspec(dllimport)
+    void OutputDebugStringA(char *String);
+    __declspec(dllimport)
     void OutputDebugStringW(wchar_t *String);
     __declspec(dllimport)
     void DebugBreak();
