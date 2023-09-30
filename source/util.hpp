@@ -611,7 +611,7 @@ bool operator==(wstr a, wstr b)
 {
 
     if (a.length == b.length) {
-        return(memcmp(a.data, b.data, a.length));
+        return(memcmp(a.data, b.data, a.length * sizeof(wchar_t)) == 0);
     } else {
         return(false);
     }

@@ -937,17 +937,56 @@ void prompt_change_search_mode()
 }
 
 
+static bool
+_path_string_is_directory(str path)
+{
+    for (s64 i = 0; i < path.length; i += 1) {
+        if (path.data[i] == '/' || path.data[i] == '\\') {
+            return(true);
+        }
+    }
+    return(false);
+}
+
+static
+str _path_string_get_extension(str path)
+{
+    str extension = {};
+    for (s64 i = path.length; i > 0; i -= 1) {
+        if (path.data[i - 1] == '.') {
+            extension = { &path.data[i], path.length - i };
+            break;
+        } else if (path.data[i - 1] == '/' || path.data[i - 1] == '\\') {
+            break;
+        }
+    }
+    return(extension);
+}
+
 bool cmp_DirItem(DirItem **left, DirItem **right)
 {
     str left_string = (**left).display_string;
     str right_string = (**right).display_string;
-    bool left_dir = (**left).is_dir;
-    bool right_dir = (**right).is_dir;
 
-    if (left_dir != right_dir) return(!left_dir && right_dir);
+    bool left_is_root = !_path_string_is_directory(left_string);
+    bool right_is_root = !_path_string_is_directory(right_string);
+    if (left_is_root != right_is_root) return(left_is_root && !right_is_root);
+
+    // Sort code files first.
+    // Using "do we have highlighting" captures what I care about:
+    // I mostly edit files for which I have syntax highlighting, so I'm likely to want to see these first in the file listing.
+    str left_extension = _path_string_get_extension(left_string);
+    str right_extension = _path_string_get_extension(right_string);
+    bool left_is_code = highlight_get_function_index(left_extension) != 0;
+    bool right_is_code = highlight_get_function_index(right_extension) != 0;
+    if (left_is_code != right_is_code) return(left_is_code && !right_is_code);
+
+    //// Sort files starting with a dot last.
     bool left_dot = left_string.length > 0 && left_string[0] == '.';
     bool right_dot = right_string.length > 0 && right_string[0] == '.';
     if (left_dot != right_dot) return(!left_dot && right_dot);
+
+    // Otherwise, sort files alphabetically.
     return(in_lexicographic_order(&left_string, &right_string));
 }
 
@@ -959,29 +998,18 @@ void prompt_browse()
     _reset_prompt();
     app.prompt.execute_function = &_prompt_browse_execute;
 
-    DirItem *items = null;
-    IoError error = path_list_directory(app.browse_directory, &items);
+    DirItemList items = path_list_directory(app.browse_directory);
 
     str prompt_text = path_to_str(app.browse_directory);
-    if (error != IoError::OK) {
-        debug_printf("Couldn't list items in \"%s\" (%s)\n", path_to_str(app.browse_directory).data, io_error_to_str(error));
-        prompt_text = stack_printf("%.*s (Couldn't list files)", str_fmt(prompt_text));
-        app.prompt.highlight_text = true;
-    }
     app.prompt.text = arena_copy(&app.prompt.arena, prompt_text);
 
-    s32 item_count = 0;
-    for (DirItem *item = items; item; item = item->next) ++item_count;
     Slice<DirItem *> sorted_items = {};
-    sorted_items.data = stack_alloc(DirItem *, item_count);
-    for (DirItem *item = items; item; item = item->next) sorted_items.data[sorted_items.length++] = item;
-    assert(sorted_items.length == item_count);
+    sorted_items.data = stack_alloc(DirItem *, items.count);
+    for (DirItem *item = items.first; item; item = item->next) sorted_items.data[sorted_items.length++] = item;
+    assert(sorted_items.length == items.count);
     stable_sort(sorted_items, cmp_DirItem);
 
-    Path parent = path_parent(app.browse_directory);
-    if (parent) ++item_count;
-
-    app.prompt.suggestions = arena_make_slice(&app.prompt.arena, PromptSuggestion, item_count);
+    app.prompt.suggestions = arena_make_slice(&app.prompt.arena, PromptSuggestion, items.count);
     s32 i = 0;
 
     for_each (item_ptr, sorted_items) {
@@ -989,23 +1017,11 @@ void prompt_browse()
 
         PromptSuggestion suggestion = {};
         suggestion.user_pointer = arena_copy(&app.prompt.arena, item->full_path);
-        suggestion.user_boolean = item->is_dir;
-
-        str display_string = item->display_string;
-        if (item->is_dir) display_string = stack_printf("%.*s\\", str_fmt(display_string));
-        suggestion.display_string = arena_copy(&app.prompt.arena, display_string);
+        suggestion.display_string = arena_copy(&app.prompt.arena, item->display_string);
 
         Buffer *matching_buffer = buffer_for_path(item->full_path);
         if (matching_buffer) suggestion.display_string_extra = get_status_mark(matching_buffer);
 
-        app.prompt.suggestions[i++] = suggestion;
-    }
-
-    if (parent) {
-        PromptSuggestion suggestion = {};
-        suggestion.display_string = lit_to_str("..");
-        suggestion.user_pointer = arena_copy(&app.prompt.arena, parent);
-        suggestion.user_boolean = true;
         app.prompt.suggestions[i++] = suggestion;
     }
 
@@ -1014,36 +1030,30 @@ void prompt_browse()
 }
 void _prompt_browse_execute(PromptSuggestion *selected, str typed)
 {
-    if (selected) {
-        bool is_dir = selected->user_boolean;
-        Path path = (Path) selected->user_pointer;
+    stack_enter_frame();
 
-        if (is_dir) {
-            set_browse_directory(path);
-            prompt_browse();
-        } else {
-            show_path(path);
-        }
-    } else {
-        stack_enter_frame();
-        Path absolute_typed = path_make_absolute(str_to_path(typed), app.browse_directory);
-
-        if (!absolute_typed) {
-            str browse_directory_string = path_to_str(app.browse_directory);
-            str user_message = stack_printf("\"%.*s\" doesn't seem to be a valid path", str_fmt(typed));
-            debug_printf("Can't open \"%.*s\" relative to \"%.*s\"\n", str_fmt(typed), str_fmt(browse_directory_string));
-            prompt_show_error(user_message);
-        } else if (path_is_directory(absolute_typed)) {
-            set_browse_directory(absolute_typed);
-            prompt_browse();
-        } else {
-            bool showed_path = show_path(absolute_typed);
-            if (!showed_path) {
-                prompt_confirm_create_file(absolute_typed);
-            }
-        }
-        stack_leave_frame();
+    Path absolute_typed = null;
+    if (typed.length > 0) {
+        absolute_typed = path_make_absolute(str_to_path(typed), app.browse_directory);
     }
+
+    if (typed.length > 0 && !absolute_typed) {
+        str browse_directory_string = path_to_str(app.browse_directory);
+        str user_message = stack_printf("\"%.*s\" doesn't seem to be a valid path", str_fmt(typed));
+        debug_printf("Can't open \"%.*s\" relative to \"%.*s\"\n", str_fmt(typed), str_fmt(browse_directory_string));
+        prompt_show_error(user_message);
+    } else if (typed.length > 0 && path_is_directory(absolute_typed)) {
+        set_browse_directory(absolute_typed);
+        prompt_browse();
+    } else if (typed.length > 0 && path_exists(absolute_typed)) {
+        show_path(absolute_typed);
+    } else if (selected) {
+        Path selected_path = (Path) selected->user_pointer;
+        show_path(selected_path);
+    } else if (typed.length > 0) {
+        prompt_confirm_create_file(absolute_typed);
+    }
+    stack_leave_frame();
 }
 
 

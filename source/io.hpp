@@ -14,6 +14,7 @@ bool path_compare(Path left, Path right);
 
 Path path_make_absolute(Path subpath, Path relative_to);
 bool path_is_directory(Path maybe_directory);
+bool path_exists(Path maybe_file);
 Path path_parent(Path source);
 
 Path str_to_path(char *string);
@@ -55,10 +56,19 @@ struct DirItem
 {
     str display_string;
     Path full_path;
-    bool is_dir;
     DirItem *next;
 };
-IoError path_list_directory(Path directory, DirItem **result);
+
+
+enum { DirItemList_MAX = 2*1024 };
+
+struct DirItemList
+{
+    DirItem *first;
+    s32 count;
+};
+
+DirItemList path_list_directory(Path directory);
 
 
 
@@ -554,20 +564,23 @@ Path get_appdata_path()
     return(result);
 }
 
-Path _path_make_absolute(wstr subpath, wstr relative_to)
+Path _path_make_absolute(wchar_t *subpath, wchar_t *relative_to)
 {
-    s32 max_sensible_length = min(subpath.length + relative_to.length + 16, S16_MAX);
-    Path absolute = _path_empty(max_sensible_length);
-    s32 result = win32::PathCchCombineEx(absolute->data, max_sensible_length, relative_to.data, subpath.data, win32::PATHCCH_ALLOW_LONG_PATHS);
+    s32 subpath_length = cstring_length(subpath);
+    s32 relative_to_length = cstring_length(relative_to);
+    s32 max_length = min(subpath_length + relative_to_length + 2, S16_MAX);
+
+    Path absolute = _path_empty(max_length);
+    s32 result = win32::PathCchCombineEx(absolute->data, max_length, relative_to, subpath, win32::PATHCCH_ALLOW_LONG_PATHS);
     if (result == 0) {
-        win32::PathCchRemoveBackslashEx(absolute->data, max_sensible_length + 1, 0, 0);
+        win32::PathCchRemoveBackslashEx(absolute->data, max_length + 1, 0, 0);
 
         s64 actual_length = cstring_length(absolute->data);
-        assert(actual_length <= max_sensible_length);
+        assert(actual_length <= max_length);
         absolute->length = (s16) actual_length;
 
         s64 old_allocation_size = stack_get_allocation_size(absolute);
-        s64 new_allocation_size = old_allocation_size - max_sensible_length + actual_length;
+        s64 new_allocation_size = old_allocation_size - max_length + actual_length;
         stack_trim_allocation(absolute, new_allocation_size);
     } else {
         absolute = null;
@@ -577,84 +590,122 @@ Path _path_make_absolute(wstr subpath, wstr relative_to)
 
 Path path_make_absolute(Path subpath, Path relative_to)
 {
-    wstr subpath_string = {};
-    subpath_string.data = subpath->data;
-    subpath_string.length = subpath->length;
-
-    wstr rel_string = {};
-    rel_string.data = relative_to->data;
-    rel_string.length = relative_to->length;
-    
-    return(_path_make_absolute(subpath_string, rel_string));
+    return(_path_make_absolute(subpath->data, relative_to->data));
 }
 
-IoError path_list_directory(Path directory, DirItem **result)
+DirItemList path_list_directory(Path directory)
 {
-    IoError error = IoError::OK;
+    DirItemList result = {};
+    DirItem *list_tail = 0;
 
-    DirItem *first_item = null;
-    DirItem *last_item = null;
-    
-    wstr directory_string = {};
-    directory_string.data = directory->data;
-    directory_string.length = directory->length;
+    struct DirectoryFifo
+    {
+        wstr subdirectory;
+        DirectoryFifo *next;
+    };
 
-    wchar_t *search_path = stack_alloc(wchar_t, directory->length + 3);
-    memcpy(search_path, directory->data, directory->length*sizeof(wchar_t));
-    s32 search_path_length = directory->length;
-    if (search_path[search_path_length - 1] != '\\') search_path[search_path_length++] = '\\';
-    search_path[search_path_length++] = '*';
-    search_path[search_path_length] = 0;
+    DirectoryFifo *fifo_head = stack_alloc(DirectoryFifo, 1);
+    fifo_head->subdirectory = {};
+    fifo_head->next = 0;
+    DirectoryFifo *fifo_tail = fifo_head;
 
-    win32::find_data_w find_data;
-    void *handle = win32::FindFirstFileW(search_path, &find_data);
-    if (handle == ((void *) -1)) {
-        u32 code = win32::GetLastError();
-        if (code == win32::ERROR_PATH_NOT_FOUND) {
-            error = IoError::DIRECTORY_NOT_FOUND;
-        } else {
-            error = IoError::UNKNOWN_ERROR;
+    while (fifo_head && result.count < DirItemList_MAX) {
+        wstr subdirectory = fifo_head->subdirectory;
+        fifo_head = fifo_head->next;
+        if (!fifo_head) {
+            fifo_tail = 0;
         }
-    } else {
-        bool done = false;
-        while (!done) {
-            if ((find_data.FileName[0] == '.' && find_data.FileName[1] == 0) ||
-                (find_data.FileName[0] == '.' && find_data.FileName[1] == '.' && find_data.FileName[2] == 0))
-            {
-                // Idk why the windows api insists on putting these values in here :/
+
+        wchar_t *search_path = stack_alloc(wchar_t, directory->length+1 + subdirectory.length+1 + 2);
+        s32 search_path_length = 0;
+
+        memcpy(search_path + search_path_length, directory->data, directory->length*sizeof(wchar_t));
+        search_path_length += directory->length;
+        if (search_path[search_path_length - 1] != '\\') search_path[search_path_length++] = '\\';
+
+        memcpy(search_path + search_path_length, subdirectory.data, subdirectory.length*sizeof(wchar_t));
+        search_path_length += subdirectory.length;
+        if (search_path[search_path_length - 1] != '\\') search_path[search_path_length++] = '\\';
+
+        search_path[search_path_length++] = '*';
+        search_path[search_path_length] = 0;
+
+        win32::find_data_w find_data;
+        void *handle = win32::FindFirstFileW(search_path, &find_data);
+        bool done = handle == ((void *) -1);
+        while (!done && result.count < DirItemList_MAX) {
+            wstr file_name = { find_data.FileName, cstring_length(find_data.FileName, alen(find_data.FileName)) };
+
+            if (file_name == L"." || file_name == L"..") {
+                // Skip these entries.
+
+            } else if (file_name == L".git") {
+                // I don't want the mess in .git to show up in the file browser.
+                // TODO maybe we should have some more inteligent logic here?
+
             } else {
-                wstr name = {};
-                name.data = find_data.FileName;
-                while (name.length < array_length(win32::find_data_w::FileName) && name.data[name.length] != 0) ++name.length;
+                wstr file_relative_path;
+                file_relative_path.data = stack_alloc(wchar_t, subdirectory.length + 1 + file_name.length + 1);
+                file_relative_path.length = 0;
 
-                DirItem *item = stack_alloc(DirItem, 1);
-                item->display_string = utf16_to_utf8(name);
-                item->full_path = _path_make_absolute(name, directory_string);
-                item->is_dir = find_data.FileAttributes & win32::FILE_ATTRIBUTE_DIRECTORY;
-                item->next = null;
+                if (subdirectory.length > 0) {
+                    memcpy(file_relative_path.data + file_relative_path.length, subdirectory.data, subdirectory.length * sizeof(wchar_t));
+                    file_relative_path.length += subdirectory.length;
+                    if (file_relative_path.data[file_relative_path.length - 1] != '\\') {
+                        file_relative_path.data[file_relative_path.length++] = '\\';
+                    }
+                }
 
-                if (!first_item) first_item = item;
-                if (last_item) last_item->next = item;
-                last_item = item;
+                memcpy(file_relative_path.data + file_relative_path.length, file_name.data, file_name.length * sizeof(wchar_t));
+                file_relative_path.length += file_name.length;
+
+                file_relative_path.data[file_relative_path.length] = 0;
+
+                // Directories.
+                if (find_data.FileAttributes & win32::FILE_ATTRIBUTE_DIRECTORY) {
+                    DirectoryFifo *fifo_entry = stack_alloc(DirectoryFifo, 1);
+                    fifo_entry->subdirectory = file_relative_path;
+                    if (fifo_tail) {
+                        fifo_tail->next = fifo_entry;
+                    } else {
+                        fifo_head = fifo_entry;
+                    }
+                    fifo_tail = fifo_entry;
+
+                // Normal files.
+                } else {
+                    DirItem *item = stack_alloc(DirItem, 1);
+                    item->display_string = utf16_to_utf8(file_relative_path);
+                    item->full_path = _path_make_absolute(file_relative_path.data, directory->data);
+                    item->next = null;
+
+                    result.count += 1;
+                    if (list_tail) {
+                        list_tail->next = item;
+                    } else {
+                        result.first = item;
+                    }
+                    list_tail = item;
+                }
             }
 
             s32 find_result = win32::FindNextFileW(handle, &find_data);
-            if (find_result == 0) {
-                u32 code = win32::GetLastError();
-                if (code != win32::ERROR_NO_MORE_FILES) {
-                    error = IoError::UNKNOWN_ERROR;
-                }
-                done = true;
-            }
+            done = find_result == 0;
         }
-        win32::FindClose(handle);
+        if (handle != ((void *) -1)) {
+            win32::FindClose(handle);
+        }
     }
 
-    if (error == IoError::OK) *result = first_item;
-    return(error);
+    return result;
 }
 
 bool path_is_directory(Path maybe_directory)
 {
     return(win32::PathIsDirectoryW(maybe_directory->data));
+}
+
+bool path_exists(Path maybe_file)
+{
+    return(win32::PathFileExistsW(maybe_file->data));
 }
