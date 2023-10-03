@@ -304,6 +304,7 @@ void _command_change_line_endings();
 void _command_change_tab_width();
 void _command_change_tab_mode();
 void _command_save_as();
+void _command_change_directory();
 void _command_close_buffer();
 
 struct Command
@@ -315,6 +316,7 @@ struct Command
 Command COMMANDS[] = {
     { lit_to_str("Select all search results"), &_command_select_all_search_results, true },
     { lit_to_str("Save as..."), &_command_save_as, true },
+    { lit_to_str("Change directory"), &_command_change_directory, true },
     { lit_to_str("Close buffer"), &_command_close_buffer, false },
     { lit_to_str("Toggle split view"), &_command_toggle_split, true },
     { lit_to_str("Insert special character"), &_command_insert_special_character, false },
@@ -545,9 +547,9 @@ void _prompt_confirm_create_file_execute(PromptSuggestion *selected, str typed)
             stack_leave_frame();
         } else {
             if (selected->user_boolean) {
-                set_browse_directory(path);
-                prompt_browse();
+                // We created a directory.
             } else {
+                // We created a file.
                 show_path(path);
             }
         }
@@ -855,6 +857,30 @@ void _command_change_tab_mode()
     };
 }
 
+void _command_change_directory()
+{
+    _reset_prompt();
+
+    app.prompt.no_suggestions_given = true;
+
+    stack_enter_frame();
+    str current_directory_string = path_to_str(app.browse_directory);
+    str prompt = stack_printf("Current directory: %.*s", str_fmt(current_directory_string));
+    app.prompt.text = arena_copy(&app.prompt.arena, prompt);
+    stack_leave_frame();
+
+    app.prompt.execute_function = [](PromptSuggestion *selected, str typed) {
+        if (typed.length > 0) {
+            stack_enter_frame();
+            Path absolute_typed = path_make_absolute(str_to_path(typed), app.browse_directory);
+            if (path_is_directory(absolute_typed)) {
+                set_browse_directory(absolute_typed);
+            }
+            stack_leave_frame();
+        }
+    };
+}
+
 void prompt_command()
 {
     _reset_prompt();
@@ -1042,9 +1068,6 @@ void _prompt_browse_execute(PromptSuggestion *selected, str typed)
         str user_message = stack_printf("\"%.*s\" doesn't seem to be a valid path", str_fmt(typed));
         debug_printf("Can't open \"%.*s\" relative to \"%.*s\"\n", str_fmt(typed), str_fmt(browse_directory_string));
         prompt_show_error(user_message);
-    } else if (typed.length > 0 && path_is_directory(absolute_typed)) {
-        set_browse_directory(absolute_typed);
-        prompt_browse();
     } else if (typed.length > 0 && path_exists(absolute_typed)) {
         show_path(absolute_typed);
     } else if (selected) {
