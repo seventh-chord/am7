@@ -994,10 +994,6 @@ bool cmp_DirItem(DirItem **left, DirItem **right)
     str left_string = (**left).display_string;
     str right_string = (**right).display_string;
 
-    bool left_is_root = !_path_string_is_directory(left_string);
-    bool right_is_root = !_path_string_is_directory(right_string);
-    if (left_is_root != right_is_root) return(left_is_root && !right_is_root);
-
     // Sort code files first.
     // Using "do we have highlighting" captures what I care about:
     // I mostly edit files for which I have syntax highlighting, so I'm likely to want to see these first in the file listing.
@@ -1011,6 +1007,11 @@ bool cmp_DirItem(DirItem **left, DirItem **right)
     bool left_dot = left_string.length > 0 && left_string[0] == '.';
     bool right_dot = right_string.length > 0 && right_string[0] == '.';
     if (left_dot != right_dot) return(!left_dot && right_dot);
+
+    // Sort files at the top level before other files.
+    bool left_is_root = !_path_string_is_directory(left_string);
+    bool right_is_root = !_path_string_is_directory(right_string);
+    if (left_is_root != right_is_root) return(left_is_root && !right_is_root);
 
     // Otherwise, sort files alphabetically.
     return(in_lexicographic_order(&left_string, &right_string));
