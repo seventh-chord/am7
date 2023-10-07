@@ -722,7 +722,7 @@ extern "C"
     __declspec(dllimport)
     s32 PathIsDirectoryW(wchar_t *Path);
     __declspec(dllimport)
-    s32 PathFileExistsW(wchar_t *Path);
+    u32 GetFileAttributesW(wchar_t *Path);
     __declspec(dllimport)
     s32 PathIsRelativeW(wchar_t *Path);
     __declspec(dllimport)

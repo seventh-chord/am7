@@ -1069,7 +1069,7 @@ void _prompt_browse_execute(PromptSuggestion *selected, str typed)
         str user_message = stack_printf("\"%.*s\" doesn't seem to be a valid path", str_fmt(typed));
         debug_printf("Can't open \"%.*s\" relative to \"%.*s\"\n", str_fmt(typed), str_fmt(browse_directory_string));
         prompt_show_error(user_message);
-    } else if (typed.length > 0 && path_exists(absolute_typed)) {
+    } else if (typed.length > 0 && path_is_normal_file(absolute_typed)) {
         show_path(absolute_typed);
     } else if (selected) {
         Path selected_path = (Path) selected->user_pointer;

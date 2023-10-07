@@ -14,7 +14,7 @@ bool path_compare(Path left, Path right);
 
 Path path_make_absolute(Path subpath, Path relative_to);
 bool path_is_directory(Path maybe_directory);
-bool path_exists(Path maybe_file);
+bool path_is_normal_file(Path maybe_file);
 Path path_parent(Path source);
 
 Path str_to_path(char *string);
@@ -705,7 +705,8 @@ bool path_is_directory(Path maybe_directory)
     return(win32::PathIsDirectoryW(maybe_directory->data));
 }
 
-bool path_exists(Path maybe_file)
+bool path_is_normal_file(Path maybe_file)
 {
-    return(win32::PathFileExistsW(maybe_file->data));
+    u32 attributes = win32::GetFileAttributesW(maybe_file->data);
+    return(attributes == win32::FILE_ATTRIBUTE_NORMAL);
 }
